@@ -1,3 +1,4 @@
+import json
 import operator
 import os
 import re
@@ -11,7 +12,6 @@ from pipenv.vendor import attr
 
 @attr.s
 class Version:
-
     major = attr.ib()
     minor = attr.ib()
     patch = attr.ib()
@@ -230,3 +230,91 @@ class Asdf(Installer):
             timeout=self.project.s.PIPENV_INSTALL_TIMEOUT,
         )
         return c
+
+
+class Homebrew(Installer):
+    def _find_installer(self):
+        # Homebrew does not use any environment variables.
+        # Therefore, the environment variable parameter is set to an empty string.
+        return self._find_python_installer_by_name("brew")
+
+    def iter_installable_versions(self):
+        """Iterate through CPython versions available for Homebrew to install."""
+        info_json = self._run("info", "--json", "python").stdout
+        for name in self._parse_homebrew_info(info_json):
+            try:
+                version = Version.parse(name.strip())
+            except ValueError:
+                continue
+            yield version
+
+    @staticmethod
+    def _parse_homebrew_info(info_json):
+        # Homebrew returns an array. The first python is the python, we desire
+        python_info = json.loads(info_json)[0]
+        available_versions = []
+        # The current version which is associated with homebrew's python
+        available_versions.append(python_info["name"])
+        # All other available versions
+        available_versions.extend(python_info["versioned_formulae"])
+        return list(map(lambda x: x.replace("python@", ""), available_versions))
+
+    def install(self, version):
+        """Install the given version with Homebrew.
+        The version must be a ``Version`` instance representing a version
+        found in Homebrew.
+        A ValueError is raised if the given version does not have a match in
+        Homebrew. A InstallerError is raised if the brew command fails.
+        """
+        c = self._run(
+            "install",
+            f"python@{version}",
+            timeout=self.project.s.PIPENV_INSTALL_TIMEOUT,
+        )
+        return c
+
+    @staticmethod
+    def _find_python_installer_by_name(name):
+        """
+        Try to locate the binary for the Homebrew package manager.
+
+        Since Homebrew has to be setup via builtin command, it is always available on
+        the path.
+        Therefore, this method differs from the static method
+        `_find_python_installer_by_name_and_env` of it's parent class and only searches
+        on the PATH. This is equivalent to which(1).
+        """
+        # Look for the Python installer using the equivalent of 'which'. On
+        # Homebrew-installed systems, the env var may not be set, but this
+        # strategy will work.
+        candidate = find_windows_executable("", name)
+        if (
+            candidate is not None
+            and os.path.isfile(candidate)
+            and os.access(candidate, os.X_OK)
+        ):
+            return candidate
+        raise InstallerNotFound()
+
+    def find_version_to_install(self, name):
+        """Find a version in the installer from the version supplied.
+
+        A ValueError is raised if a matching version cannot be found.
+        """
+        # This method has the early return removed,
+        # because Homebrew does not specify patches
+        version = Version.parse(name)
+        try:
+            best_match = max(
+                (
+                    inst_version
+                    for inst_version in self.iter_installable_versions()
+                    if inst_version.matches_minor(version)
+                ),
+                key=operator.attrgetter("cmpkey"),
+            )
+        except ValueError:
+            raise ValueError(
+                f"no installable version found for {name!r}",
+            )
+        return best_match
