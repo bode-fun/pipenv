@@ -58,7 +58,6 @@ from pipenv.vendor import click, plette, vistir
 from pipenv.vendor.requirementslib.models.requirements import Requirement
 
 if MYPY_RUNNING:
-
     TSourceDict = Dict[str, Union[str, bool]]
 
 
@@ -442,8 +441,12 @@ def ensure_python(project, three=None, python=None):
                         installed_python_version = python_version(path_to_python)
                         if isinstance(installer, Homebrew):
                             # Versions specified for Homebrew,
-                            # do not contain a patch version
-                            assert installed_python_version.startswith(version)
+                            # do not contain a patch version.
+                            assert (
+                                installed_python_version is not None
+                                and ".".join(installed_python_version.split(".")[:2])
+                                == version
+                            )
                         else:
                             assert installed_python_version == version
                     except AssertionError:

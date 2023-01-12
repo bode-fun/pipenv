@@ -12,7 +12,6 @@ from pipenv.vendor import attr
 
 @attr.s
 class Version:
-
     major = attr.ib()
     minor = attr.ib()
     patch = attr.ib()
@@ -296,3 +295,26 @@ class Homebrew(Installer):
         ):
             return candidate
         raise InstallerNotFound()
+
+    def find_version_to_install(self, name):
+        """Find a version in the installer from the version supplied.
+
+        A ValueError is raised if a matching version cannot be found.
+        """
+        # This method has the early return removed,
+        # because Homebrew does not specify patches
+        version = Version.parse(name)
+        try:
+            best_match = max(
+                (
+                    inst_version
+                    for inst_version in self.iter_installable_versions()
+                    if inst_version.matches_minor(version)
+                ),
+                key=operator.attrgetter("cmpkey"),
+            )
+        except ValueError:
+            raise ValueError(
+                f"no installable version found for {name!r}",
+            )
+        return best_match
